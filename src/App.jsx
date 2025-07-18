@@ -3,6 +3,12 @@ import { Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
 
 const API_BASE_URL = 'https://ai-call-auditor-production.up.railway.app';
 
+function formatTime(seconds) {
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
 function UploadPage() {
   const [audioFile, setAudioFile] = useState(null);
   const [pitchFile, setPitchFile] = useState(null);
@@ -62,7 +68,7 @@ function ReviewPage() {
   const [transcript, setTranscript] = useState([]);
   const [audioUrl, setAudioUrl] = useState('');
   const [pitch, setPitch] = useState([]);
-  const [suggestions, setSuggestions] = useState([]);
+  const [suggestions, setSuggestions] = useState({ said: [], missed: [], next: '' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -87,16 +93,21 @@ function ReviewPage() {
         // Fetch transcript
         const tRes = await fetch(`${API_BASE_URL}/transcript/${conversationId}`);
         const tData = await tRes.json();
-        setTranscript(Array.isArray(tData) ? tData : tData.transcript || []);
+        const transcriptArr = Array.isArray(tData.transcript) ? tData.transcript : (Array.isArray(tData) ? tData : []);
+        setTranscript(transcriptArr);
         setAudioUrl(tData.audio_url || '');
         // Fetch pitch
         const pRes = await fetch(`${API_BASE_URL}/pitch/${conversationId}`);
         const pData = await pRes.json();
-        setPitch(Array.isArray(pData) ? pData : pData.pitch || []);
+        setPitch(Array.isArray(pData.steps) ? pData.steps : (Array.isArray(pData) ? pData : []));
         // Fetch suggestions
         const sRes = await fetch(`${API_BASE_URL}/suggestions/${conversationId}`);
         const sData = await sRes.json();
-        setSuggestions(Array.isArray(sData) ? sData : sData.suggestions || []);
+        setSuggestions({
+          said: sData.said || [],
+          missed: sData.missed || [],
+          next: sData.next || '',
+        });
       } catch (err) {
         setError('Failed to load review data.');
       } finally {
@@ -115,11 +126,11 @@ function ReviewPage() {
     try {
       const res = await fetch(`${API_BASE_URL}/chat/${conversationId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: chatInput }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ question: chatInput }),
       });
       const data = await res.json();
-      setChatHistory((h) => [...h, { role: 'assistant', content: data.response || 'No response.' }]);
+      setChatHistory((h) => [...h, { role: 'assistant', content: data.answer || 'No response.' }]);
     } catch {
       setChatHistory((h) => [...h, { role: 'assistant', content: 'Error getting response.' }]);
     } finally {
@@ -134,13 +145,9 @@ function ReviewPage() {
     if (!searchInput.trim()) return;
     setSearchLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/search/${conversationId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: searchInput }),
-      });
+      const res = await fetch(`${API_BASE_URL}/search/${conversationId}?query=${encodeURIComponent(searchInput)}`);
       const data = await res.json();
-      setSearchResults(data.results || []);
+      setSearchResults(Array.isArray(data) ? data : data.results || []);
     } catch {
       setSearchResults([]);
     } finally {
@@ -172,29 +179,39 @@ function ReviewPage() {
           {/* Transcript */}
           <div className="mb-6">
             <h3 className="font-semibold mb-2">Transcript</h3>
-            <div className="bg-gray-100 p-3 rounded text-sm max-h-48 overflow-y-auto">
-              {transcript.length > 0 ? transcript.map((line, i) => (
-                <div key={i}>{line.text}</div>
-              )) : <div className="text-gray-400">No transcript available.</div>}
+            <div className="bg-gray-100 p-3 rounded text-sm max-h-64 overflow-y-auto">
+              {Array.isArray(transcript) && transcript.length > 0 ? (
+                transcript.map((line, i) => (
+                  <div key={i} className={`flex items-start gap-2 py-1 ${i % 2 === 0 ? 'bg-gray-50' : ''}`}>
+                    <span className="font-bold text-blue-700 min-w-[80px]">{line.speaker || 'Speaker'}</span>
+                    <span className="text-xs text-gray-400 min-w-[50px]">[{formatTime(line.start)}]</span>
+                    <span className="flex-1">{line.text}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="text-gray-400">No transcript available.</div>
+              )}
             </div>
           </div>
           {/* Pitch Steps */}
           <div className="mb-6">
             <h3 className="font-semibold mb-2">Pitch Steps</h3>
-            <ul className="list-disc pl-6">
-              {pitch.length > 0 ? pitch.map((step, i) => (
-                <li key={i}>{step}</li>
-              )) : <li className="text-gray-400">No pitch steps available.</li>}
-            </ul>
+            <ol className="list-decimal pl-6">
+              {Array.isArray(pitch) && pitch.length > 0 ? (
+                pitch.map((step, i) => (
+                  <li key={i} className="mb-1">{step.text || JSON.stringify(step)}</li>
+                ))
+              ) : (
+                <li className="text-gray-400">No pitch steps available.</li>
+              )}
+            </ol>
           </div>
           {/* Suggestions */}
           <div className="mb-6">
             <h3 className="font-semibold mb-2">Suggestions</h3>
-            <ul className="list-disc pl-6">
-              {suggestions.length > 0 ? suggestions.map((s, i) => (
-                <li key={i}>{s}</li>
-              )) : <li className="text-gray-400">No suggestions available.</li>}
-            </ul>
+            <div className="mb-1"><span className="font-semibold">Said:</span> {suggestions.said.length > 0 ? suggestions.said.join(', ') : <span className="text-gray-400">None</span>}</div>
+            <div className="mb-1"><span className="font-semibold">Missed:</span> {suggestions.missed.length > 0 ? suggestions.missed.join(', ') : <span className="text-gray-400">None</span>}</div>
+            <div className="mb-1"><span className="font-semibold">Next:</span> {suggestions.next || <span className="text-gray-400">None</span>}</div>
           </div>
           {/* Chat */}
           <div className="mb-6">
@@ -241,9 +258,9 @@ function ReviewPage() {
                 <div key={i} className="mb-1">
                   <button
                     className="text-blue-700 underline mr-2"
-                    onClick={() => jumpToTimestamp(result.timestamp)}
+                    onClick={() => jumpToTimestamp(result.start)}
                   >
-                    [{result.timestamp}s]
+                    [{formatTime(result.start)}]
                   </button>
                   {result.text}
                 </div>
