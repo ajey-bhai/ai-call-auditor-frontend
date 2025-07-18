@@ -87,16 +87,16 @@ function ReviewPage() {
         // Fetch transcript
         const tRes = await fetch(`${API_BASE_URL}/transcript/${conversationId}`);
         const tData = await tRes.json();
-        setTranscript(tData.transcript || []);
+        setTranscript(Array.isArray(tData) ? tData : tData.transcript || []);
         setAudioUrl(tData.audio_url || '');
         // Fetch pitch
         const pRes = await fetch(`${API_BASE_URL}/pitch/${conversationId}`);
         const pData = await pRes.json();
-        setPitch(pData.pitch || []);
+        setPitch(Array.isArray(pData) ? pData : pData.pitch || []);
         // Fetch suggestions
         const sRes = await fetch(`${API_BASE_URL}/suggestions/${conversationId}`);
         const sData = await sRes.json();
-        setSuggestions(sData.suggestions || []);
+        setSuggestions(Array.isArray(sData) ? sData : sData.suggestions || []);
       } catch (err) {
         setError('Failed to load review data.');
       } finally {
